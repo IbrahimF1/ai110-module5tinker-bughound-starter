@@ -47,3 +47,45 @@ def test_mock_client_forces_llm_fallback_to_heuristics_for_analysis():
     assert any(issue.get("type") == "Code Quality" for issue in result["issues"])
     # Ensure we logged the fallback path
     assert any("Falling back to heuristics" in entry.get("message", "") for entry in result["logs"])
+
+
+class _BadSeverityClient:
+    """LLM stub that returns valid JSON but with an unknown severity value."""
+
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        if "Return ONLY valid JSON" in system_prompt:
+            return '[{"type": "Bug", "severity": "CRITICAL", "msg": "something bad"}]'
+        # fixer — return something minimal
+        return "def f():\n    pass\n"
+
+
+def test_llm_issue_with_unknown_severity_gets_normalized():
+    """Unknown severity values should be mapped to 'Medium' by the validator."""
+    agent = BugHoundAgent(client=_BadSeverityClient())
+    code = "def f():\n    pass\n"
+    result = agent.run(code)
+
+    issues = result["issues"]
+    assert len(issues) >= 1
+    assert issues[0]["severity"] == "Medium"
+
+
+class _EmptyMsgClient:
+    """LLM stub that returns JSON issues with empty messages."""
+
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        if "Return ONLY valid JSON" in system_prompt:
+            return '[{"type": "Bug", "severity": "High", "msg": ""}]'
+        return "def f():\n    pass\n"
+
+
+def test_llm_issues_with_empty_msgs_trigger_heuristic_fallback():
+    """Issues with empty messages should be filtered out; if none remain,
+    the agent should fall back to heuristics."""
+    agent = BugHoundAgent(client=_EmptyMsgClient())
+    code = "def f():\n    print('hi')\n    return True\n"
+    result = agent.run(code)
+
+    # Heuristic fallback should detect the print statement
+    assert any(issue.get("type") == "Code Quality" for issue in result["issues"])
+    assert any("Falling back to heuristics" in entry.get("message", "") for entry in result["logs"])

@@ -53,6 +53,9 @@ class BugHoundAgent:
     # ----------------------------
     # Workflow steps
     # ----------------------------
+    # Valid severity values the risk assessor knows how to handle
+    VALID_SEVERITIES = {"low", "medium", "high"}
+
     def analyze(self, code_snippet: str) -> List[Dict[str, str]]:
         if not self._can_call_llm():
             self._log("ANALYZE", "Using heuristic analyzer (offline mode).")
@@ -82,7 +85,25 @@ class BugHoundAgent:
             self._log("ANALYZE", "LLM output was not parseable JSON. Falling back to heuristics.")
             return self._heuristic_analyze(code_snippet)
 
-        return issues
+        # Validate LLM issues: filter out entries with empty messages or
+        # unrecognized severity values.  If nothing survives validation,
+        # fall back to heuristics so the user always gets actionable results.
+        validated = self._validate_issues(issues)
+        if not validated:
+            self._log(
+                "ANALYZE",
+                "LLM issues did not pass validation (empty msgs or bad severity). "
+                "Falling back to heuristics.",
+            )
+            return self._heuristic_analyze(code_snippet)
+
+        if len(validated) < len(issues):
+            self._log(
+                "ANALYZE",
+                f"Dropped {len(issues) - len(validated)} invalid issue(s) from LLM output.",
+            )
+
+        return validated
 
     def propose_fix(self, code_snippet: str, issues: List[Dict[str, str]]) -> str:
         if not issues:
@@ -171,6 +192,32 @@ class BugHoundAgent:
     # ----------------------------
     # Parsing + utilities
     # ----------------------------
+    def _validate_issues(self, issues: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Filter out issues with empty messages and normalize severity values.
+
+        The risk assessor only recognises Low / Medium / High.  Any other
+        severity from the LLM is mapped to ``"Medium"`` as a conservative
+        default so the issue is still surfaced but scored cautiously.
+        """
+        validated: List[Dict[str, str]] = []
+        for issue in issues:
+            msg = issue.get("msg", "").strip()
+            if not msg:
+                continue  # drop issues with no explanation
+
+            severity = str(issue.get("severity", "Medium")).strip().lower()
+            if severity not in self.VALID_SEVERITIES:
+                severity = "medium"  # conservative default
+
+            validated.append(
+                {
+                    "type": issue.get("type", "Issue"),
+                    "severity": severity.capitalize(),
+                    "msg": msg,
+                }
+            )
+        return validated
+
     def _parse_json_array_of_issues(self, text: str) -> Optional[List[Dict[str, str]]]:
         text = text.strip()
         parsed = self._try_json_loads(text)

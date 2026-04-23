@@ -4,6 +4,12 @@ BugHound is a small, agent-style debugging tool. It analyzes a Python code snipp
 
 ---
 
+## Reflection
+
+Learners need to understand the plan, analyze, act, test, and reflect process. They also need to understand how deterministic guardrails protect us from LLMs going off the rails. Students might stuggle with parsing and validating the model output. AI was helpful for explaining the workflow and drafting test structure, but misleading when it suggested risk-score changes without considering how they cascade into the auto-fix decision. To guide a student without giving the answer, I would have them run BugHound on the same input twice, change one value in the risk scorer, run it again, and explain what shifted.
+
+---
+
 ## What BugHound Does
 
 Given a short Python snippet, BugHound:

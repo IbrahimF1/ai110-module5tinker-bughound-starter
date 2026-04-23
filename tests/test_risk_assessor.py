@@ -46,3 +46,40 @@ def test_missing_return_is_penalized():
     )
     assert risk["score"] < 100
     assert any("Return" in r or "return" in r for r in risk["reasons"])
+
+
+def test_high_severity_prevents_autofix_even_with_low_score():
+    """Guardrail: high-severity issues must block auto-fix regardless of score."""
+    original = "def f():\n    try:\n        return 1\n    except:\n        return 0\n"
+    fixed = "def f():\n    try:\n        return 1\n    except Exception as e:\n        return 0\n"
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Reliability", "severity": "High", "msg": "bare except"}],
+    )
+    assert risk["should_autofix"] is False
+
+
+def test_over_editing_is_penalized():
+    """Guardrail: fixes that add >50 % more lines should lose points."""
+    original = "def f():\n    return 1\n"
+    # Fixed code is 5× longer — clear over-editing signal
+    fixed = (
+        "import logging\n"
+        "\n"
+        "logger = logging.getLogger(__name__)\n"
+        "\n"
+        "def f():\n"
+        '    """Return one."""\n'
+        "    logger.info('entering f')\n"
+        "    result = 1\n"
+        "    logger.info('leaving f')\n"
+        "    return result\n"
+    )
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Code Quality", "severity": "Low", "msg": "minor"}],
+    )
+    assert any("over-editing" in r.lower() for r in risk["reasons"])
+    assert risk["score"] < 100

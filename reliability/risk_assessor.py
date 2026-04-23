@@ -53,6 +53,12 @@ def assess_risk(
         score -= 20
         reasons.append("Fixed code is much shorter than original.")
 
+    # NEW: Detect over-editing — if the fix adds more than 50 % more lines
+    # than the original, the LLM may have rewritten too aggressively.
+    if len(original_lines) > 0 and len(fixed_lines) > len(original_lines) * 1.5:
+        score -= 15
+        reasons.append("Fixed code is significantly longer than original — possible over-editing.")
+
     if "return" in original_code and "return" not in fixed_code:
         score -= 30
         reasons.append("Return statements may have been removed.")
@@ -80,7 +86,12 @@ def assess_risk(
     # ----------------------------
     # Auto-fix policy
     # ----------------------------
-    should_autofix = level == "low"
+    # Tightened: never auto-fix when any high-severity issue was involved,
+    # even if the overall score happens to stay in the "low" range.
+    has_high_severity = any(
+        str(issue.get("severity", "")).lower() == "high" for issue in issues
+    )
+    should_autofix = level == "low" and not has_high_severity
 
     if not reasons:
         reasons.append("No significant risks detected.")
